@@ -42,7 +42,7 @@ app.get('/api/t212/portfolio', async (req, res) => {
         
         if (!response.ok) {
             const errorText = await response.text();
-            console.error('T212 API Error:', response.status, errorText);
+            console.error('T212 API Error:', {   status: response.status,   details: errorText,   keyPresent: !!T212_API_KEY,   keyLength: T212_API_KEY?.length,   keyPrefix: T212_API_KEY?.slice(0, 4),   keySuffix: T212_API_KEY?.slice(-4) });
             return res.status(response.status).json({ error: 'Trading 212 API error', details: errorText });
         }
         
