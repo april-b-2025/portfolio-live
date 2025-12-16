@@ -1494,7 +1494,7 @@
                 addMessage(response, 'assistant');
             } catch (error) {
                 removeTypingIndicator();
-                addMessage('AI Advisor not available. Make sure ANTHROPIC_API_KEY is set in your Replit Secrets.', 'system');
+                addMessage('AI Advisor not available. Make sure ANTHROPIC_API_KEY is configured in your environment variables.', 'system');
             }
         }
         
