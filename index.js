@@ -35,7 +35,7 @@ app.get('/api/t212/portfolio', async (req, res) => {
         const response = await fetch('https://live.trading212.com/api/v0/equity/portfolio', {
             method: 'GET',
             headers: {
-                'Authorization': T212_API_KEY,
+                'Authorization': `Bearer ${T212_API_KEY}`,
                 'Content-Type': 'application/json'
             }
         });
@@ -65,7 +65,7 @@ app.get('/api/t212/cash', async (req, res) => {
         const response = await fetch('https://live.trading212.com/api/v0/equity/account/cash', {
             method: 'GET',
             headers: {
-                'Authorization': T212_API_KEY,
+                'Authorization': `Bearer ${T212_API_KEY}`,
                 'Content-Type': 'application/json'
             }
         });
@@ -92,7 +92,7 @@ app.get('/api/t212/instruments', async (req, res) => {
         const response = await fetch('https://live.trading212.com/api/v0/equity/metadata/instruments', {
             method: 'GET',
             headers: {
-                'Authorization': T212_API_KEY,
+                'Authorization': `Bearer ${T212_API_KEY}`,
                 'Content-Type': 'application/json'
             }
         });
