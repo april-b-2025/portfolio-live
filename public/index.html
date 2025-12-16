@@ -1115,7 +1115,7 @@
                 return processT212Data(data);
             } catch (error) {
                 console.error('T212 fetch error:', error);
-                showError('Could not fetch Trading 212 data. Check your API key in Replit Secrets.');
+                showError('Could not fetch Trading 212 data. Check your API key configuration.');
                 return [];
             }
         }
