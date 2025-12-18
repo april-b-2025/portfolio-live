@@ -1127,7 +1127,7 @@
                 
                 // Check if price is in GBX (pence)
                 const ticker = position.ticker || '';
-                const isLikelyGbx = priceGbp > 100 && !ticker.includes('.');
+                const isLikelyGbx = priceGbp > 100 && ticker.endsWith('.L');
                 
                 if (isLikelyGbx) {
                     priceGbp = priceGbp / 100;
