@@ -18,7 +18,7 @@ app.use(express.static('public'));
 // =============================================================================
 
 const T212_API_KEY = process.env.T212_API_KEY;
-const T212_API_SECRET = process.env.T212_API_SECRET; // ✅ ADDED
+const T212_API_SECRET = process.env.T212_API_SECRET;
 const COINGECKO_API_KEY = process.env.COINGECKO_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -30,10 +30,81 @@ function getT212AuthHeader() {
 }
 
 // =============================================================================
+// INSTRUMENTS CACHE + GBX -> GBP NORMALIZATION (NO GUESSING)
+// =============================================================================
+
+// Cache instruments in memory (so we don't download thousands of rows every request)
+let instrumentsCache = null;     // Map(ticker -> instrument)
+let instrumentsCacheTime = 0;
+const INSTRUMENTS_CACHE_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+async function fetchInstrumentsMap(authHeader) {
+  const now = Date.now();
+
+  // Serve from cache if fresh
+  if (instrumentsCache && (now - instrumentsCacheTime) < INSTRUMENTS_CACHE_MS) {
+    return instrumentsCache;
+  }
+
+  const response = await fetch('https://live.trading212.com/api/v0/equity/metadata/instruments', {
+    method: 'GET',
+    headers: {
+      'Authorization': authHeader,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`T212 instruments fetch failed (${response.status}): ${errorText}`);
+  }
+
+  const instruments = await response.json();
+
+  // Build a lookup map by ticker
+  const map = new Map();
+  for (const inst of instruments) {
+    if (!inst?.ticker) continue;
+    map.set(inst.ticker, inst);
+    map.set(inst.ticker.replace('_EQ', ''), inst);
+  }
+
+  instrumentsCache = map;
+  instrumentsCacheTime = now;
+
+  return map;
+}
+
+function normalizeGbxPrices(position, instrument) {
+  // Trading 212 instruments usually include a currency-like field.
+  // Depending on account / API version it might be: currencyCode, currency, currencyId, etc.
+  const currency =
+    instrument?.currencyCode ||
+    instrument?.currency ||
+    instrument?.currencyId ||
+    position?.currencyCode ||
+    position?.currency;
+
+  // If the instrument is priced in GBX (pence), convert to GBP (pounds)
+  if (currency === 'GBX') {
+    if (typeof position.currentPrice === 'number') position.currentPrice = position.currentPrice / 100;
+    if (typeof position.averagePrice === 'number') position.averagePrice = position.averagePrice / 100;
+
+    // Optional debug flags (harmless)
+    position._priceWasGbx = true;
+    position._currencyNormalizedTo = 'GBP';
+  } else {
+    position._priceWasGbx = false;
+  }
+
+  return position;
+}
+
+// =============================================================================
 // TRADING 212 API PROXY
 // =============================================================================
 
-// Get portfolio positions
+// Get portfolio positions (NOW NORMALIZED using instruments currency, not estimates)
 app.get('/api/t212/portfolio', async (req, res) => {
   const authHeader = getT212AuthHeader();
   if (!authHeader) {
@@ -41,23 +112,36 @@ app.get('/api/t212/portfolio', async (req, res) => {
   }
 
   try {
+    // 1) Fetch portfolio
     const response = await fetch('https://live.trading212.com/api/v0/equity/portfolio', {
       method: 'GET',
       headers: {
-        'Authorization': authHeader, // ✅ CHANGED (Basic auth)
+        'Authorization': authHeader,
         'Content-Type': 'application/json'
       }
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('T212 API Error:', response.status, errorText); // ✅ safer logging
+      console.error('T212 API Error:', response.status, errorText);
       return res.status(response.status).json({ error: 'Trading 212 API error', details: errorText });
     }
 
     const data = await response.json();
-    console.log(`✅ Fetched ${data.length} positions from Trading 212`);
-    res.json(data);
+
+    // 2) Fetch instruments map (for currency info like GBX/GBP)
+    const instrumentsMap = await fetchInstrumentsMap(authHeader);
+
+    // 3) Normalize: for each position, look up its instrument and convert only if GBX
+    const normalized = data.map(pos => {
+      const tickerKey = (pos.ticker || '').replace('_EQ', '');
+      const inst = instrumentsMap.get(pos.ticker) || instrumentsMap.get(tickerKey);
+      return normalizeGbxPrices(pos, inst);
+    });
+
+    console.log(`✅ Fetched ${normalized.length} positions from Trading 212 (GBX->GBP normalized where needed)`);
+    res.json(normalized);
+
   } catch (error) {
     console.error('T212 Proxy Error:', error.message);
     res.status(500).json({ error: 'Failed to fetch from Trading 212', details: error.message });
@@ -75,7 +159,7 @@ app.get('/api/t212/cash', async (req, res) => {
     const response = await fetch('https://live.trading212.com/api/v0/equity/account/cash', {
       method: 'GET',
       headers: {
-        'Authorization': authHeader, // ✅ CHANGED
+        'Authorization': authHeader,
         'Content-Type': 'application/json'
       }
     });
@@ -94,7 +178,7 @@ app.get('/api/t212/cash', async (req, res) => {
   }
 });
 
-// Get instrument info
+// Get instrument info (still available as your original endpoint)
 app.get('/api/t212/instruments', async (req, res) => {
   const authHeader = getT212AuthHeader();
   if (!authHeader) {
@@ -105,7 +189,7 @@ app.get('/api/t212/instruments', async (req, res) => {
     const response = await fetch('https://live.trading212.com/api/v0/equity/metadata/instruments', {
       method: 'GET',
       headers: {
-        'Authorization': authHeader, // ✅ CHANGED
+        'Authorization': authHeader,
         'Content-Type': 'application/json'
       }
     });
@@ -218,7 +302,7 @@ app.post('/api/ai/chat', async (req, res) => {
 
 app.get('/api/config', (req, res) => {
   res.json({
-    t212Configured: !!(T212_API_KEY && T212_API_SECRET), // ✅ updated to require BOTH
+    t212Configured: !!(T212_API_KEY && T212_API_SECRET),
     coingeckoConfigured: !!COINGECKO_API_KEY,
     anthropicConfigured: !!ANTHROPIC_API_KEY
   });
@@ -252,7 +336,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   Server running on port ${PORT}`);
   console.log('');
   console.log('   API Status:');
-  console.log(`   • Trading 212:  ${(T212_API_KEY && T212_API_SECRET) ? '✅ Configured' : '❌ Not configured'}`); // ✅ updated
+  console.log(`   • Trading 212:  ${(T212_API_KEY && T212_API_SECRET) ? '✅ Configured' : '❌ Not configured'}`);
   console.log(`   • CoinGecko:    ${COINGECKO_API_KEY ? '✅ Configured' : '⚠️  Using free tier'}`);
   console.log(`   • Anthropic:    ${ANTHROPIC_API_KEY ? '✅ Configured' : '❌ Not configured'}`);
   console.log('');
